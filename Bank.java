@@ -20,14 +20,13 @@ public class Bank {
     // Semaphores controlling access to shared resources
     private static final Semaphore managerApproval = new Semaphore(1);  // Only 1 teller can use manager at a time
     private static final Semaphore safeAccess = new Semaphore(2);       // Max 2 tellers can access safe simultaneously
-    private static final Semaphore bankDoor = new Semaphore(2);          // Max 2 customers in the bank
+    private static final Semaphore bankDoor = new Semaphore(2);         // Max 2 customers in the bank
     
-
     // Queue for managing customer-teller interactions
     private static final BlockingQueue<CustomerInteraction> customerQueue = new LinkedBlockingQueue<>();
 
-    // Ensure bank opens only after all tellers are ready
-    private static final CountDownLatch tellersReady = new CountDownLatch(NUM_TELLERS);
+    // Semaphore to ensure bank opens only after all tellers are ready
+    private static final Semaphore tellersReadySemaphore = new Semaphore(0);
 
     // Track completed customer transactions
     private static final AtomicInteger totalServedCustomers = new AtomicInteger(0);
@@ -41,8 +40,8 @@ public class Bank {
             tellerThreads.add(teller);
         }
 
-        // Wait for all tellers to announce they are ready
-        tellersReady.await();
+        // Wait for all tellers to signal readiness
+        tellersReadySemaphore.acquire(NUM_TELLERS);
         System.out.println("Bank: All tellers are ready. Bank opens.");
 
         // Start customer threads
@@ -51,7 +50,14 @@ public class Bank {
             Thread customer = new Thread(new Customer(i));
             customer.start();
             customerThreads.add(customer);
-            Thread.sleep(2); // Small stagger for smoother thread creation
+
+            // Random stagger: customers arrive at slightly different times
+            int randomDelay = ThreadLocalRandom.current().nextInt(0, 51); // 0–50ms
+            try {
+                Thread.sleep(randomDelay);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
 
         // Wait for all customers to finish
@@ -105,7 +111,8 @@ public class Bank {
         @Override
         public void run() {
             System.out.printf("Teller %d: ready to serve.%n", tellerId);
-            tellersReady.countDown();
+            // Signal main thread that this teller is ready
+            tellersReadySemaphore.release();
 
             try {
                 while (true) {
